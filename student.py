@@ -225,12 +225,12 @@ class VAE(nn.Module):
 
     def forward(self, x):
         x = self.encoder(x)
-        x = x.view(-1, 4*4*256)
+        x = x.reshape(-1, 4*4*256)
         mu = self.fc_mu(x)
         logvar = self.fc_logvar(x)
         z = self.reparameterize(mu, logvar)
         d = self.decoder_input(z)
-        d = d.view(-1, 256, 4, 4)
+        d = d.reshape(-1, 256, 4, 4)
         recon = self.decoder(d)
         return recon, mu, logvar
 
@@ -255,14 +255,14 @@ class MDRNN(nn.Module):
         stride = self.gaussians * self.latents
         
         mus = y[:, :, :stride]
-        mus = mus.view(seq_len, batch_size, self.gaussians, self.latents)
+        mus = mus.reshape(seq_len, batch_size, self.gaussians, self.latents)
         
         sigmas = y[:, :, stride:2*stride]
-        sigmas = sigmas.view(seq_len, batch_size, self.gaussians, self.latents)
+        sigmas = sigmas.reshape(seq_len, batch_size, self.gaussians, self.latents)
         sigmas = torch.exp(sigmas)
         
         logpi = y[:, :, 2*stride:]
-        logpi = logpi.view(seq_len, batch_size, self.gaussians)
+        logpi = logpi.reshape(seq_len, batch_size, self.gaussians)
         logpi = F.log_softmax(logpi, dim=-1)
         
         return mus, sigmas, logpi
