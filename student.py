@@ -278,9 +278,10 @@ class Controller(nn.Module):
 class Policy(nn.Module):
     continuous = True 
 
-    def __init__(self, device=torch.device('cpu')):
+    def __init__(self, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
         super(Policy, self).__init__()
         self.device = device
+        print(f"Policy initialized on device: {self.device}")
         self.vae = VAE(device).to(device)
         self.mdrnn = MDRNN(LATENT_SIZE, ACTION_SIZE, HIDDEN_SIZE, GAUSSIANS).to(device)
         self.controller = Controller(LATENT_SIZE, HIDDEN_SIZE, ACTION_SIZE).to(device)
