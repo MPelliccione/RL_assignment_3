@@ -7,6 +7,182 @@ import os
 from torch.utils.data import DataLoader, TensorDataset
 from torch.distributions.normal import Normal
 
+# --- Patch for gymnasium CarRacing-v2 with numpy >= 2.0 ---
+import gymnasium.envs.box2d.car_dynamics as car_dynamics
+
+def patched_step(self, dt):
+    for w in self.wheels:
+        # Steer each wheel
+        dir = np.sign(w.steer - w.joint.angle)
+        val = abs(w.steer - w.joint.angle)
+        w.joint.motorSpeed = float(dir * min(50.0 * val, 3.0))
+
+        # Position => friction_limit
+        grass = True
+        friction_limit = car_dynamics.FRICTION_LIMIT * 0.6  # Grass friction if no tile
+        for tile in w.tiles:
+            friction_limit = max(
+                friction_limit, car_dynamics.FRICTION_LIMIT * tile.road_friction
+            )
+            grass = False
+
+        # Force
+        forw = w.GetWorldVector((0, 1))
+        side = w.GetWorldVector((1, 0))
+        v = w.linearVelocity
+        vf = forw[0] * v[0] + forw[1] * v[1]  # forward speed
+        vs = side[0] * v[0] + side[1] * v[1]  # side speed
+
+        # WHEEL_MOMENT_OF_INERTIA*np.square(w.omega)/2 = E -- energy
+        # WHEEL_MOMENT_OF_INERTIA*w.omega * domega/dt = dE/dt = W -- power
+        # domega = dt*W/WHEEL_MOMENT_OF_INERTIA/w.omega
+
+        # add small coef not to divide by zero
+        w.omega += (
+            dt
+            * car_dynamics.ENGINE_POWER
+            * w.gas
+            / car_dynamics.WHEEL_MOMENT_OF_INERTIA
+            / (abs(w.omega) + 5.0)
+        )
+        self.fuel_spent += dt * car_dynamics.ENGINE_POWER * w.gas
+
+        if w.brake >= 0.9:
+            w.omega = 0
+        elif w.brake > 0:
+            BRAKE_FORCE = 15  # radians per second
+            dir = -np.sign(w.omega)
+            val = BRAKE_FORCE * w.brake
+            if abs(val) > abs(w.omega):
+                val = abs(w.omega)  # low speed => same as = 0
+            w.omega += dir * val
+        w.phase += w.omega * dt
+
+        vr = w.omega * w.wheel_rad  # rotating wheel speed
+        f_force = -vf + vr  # force direction is direction of speed difference
+        p_force = -vs
+
+        # Physically correct is to always apply friction_limit until speed is equal.
+        # But dt is finite, that will lead to oscillations if difference is already near zero.
+
+        # Random coefficient to cut oscillations in few steps (have no effect on friction_limit)
+        f_force *= 205000 * car_dynamics.SIZE * car_dynamics.SIZE
+        p_force *= 205000 * car_dynamics.SIZE * car_dynamics.SIZE
+        force = np.sqrt(np.square(f_force) + np.square(p_force))
+
+        # Skid trace
+        if abs(force) > 2.0 * friction_limit:
+            if (
+                w.skid_particle
+                and w.skid_particle.grass == grass
+                and len(w.skid_particle.poly) < 30
+            ):
+                w.skid_particle.poly.append((w.position[0], w.position[1]))
+            elif w.skid_start is None:
+                w.skid_start = w.position
+            else:
+                w.skid_particle = self._create_particle(
+                    w.skid_start, w.position, grass
+                )
+                w.skid_start = None
+        else:
+            w.skid_start = None
+            w.skid_particle = None
+
+        if abs(force) > friction_limit:
+            f_force /= force
+            p_force /= force
+            force = friction_limit  # Correct physics here
+            f_force *= force
+            p_force *= force
+
+        w.omega -= dt * f_force * w.wheel_rad / car_dynamics.WHEEL_MOMENT_OF_INERTIA
+
+        w.ApplyForceToCenter(
+            (
+                float(p_force * side[0] + f_force * forw[0]),
+                float(p_force * side[1] + f_force * forw[1]),
+            ),
+            True,
+        )
+
+car_dynamics.Car.step = patched_step
+
+# --- Patch for CarRacing._render_indicators ---
+import gymnasium.envs.box2d.car_racing as car_racing_module
+
+def patched_render_indicators(self, W, H):
+    import pygame
+    s = W / 40.0
+    h = H / 40.0
+    color = (0, 0, 0)
+    polygon = [(W, H), (W, H - 5 * h), (0, H - 5 * h), (0, H)]
+    pygame.draw.polygon(self.surf, color=color, points=polygon)
+
+    def vertical_ind(place, val):
+        return [
+            (float(place * s), float(H - (h + h * val))),
+            (float((place + 1) * s), float(H - (h + h * val))),
+            (float((place + 1) * s), float(H - h)),
+            (float((place + 0) * s), float(H - h)),
+        ]
+
+    def horiz_ind(place, val):
+        return [
+            (float((place + 0) * s), float(H - 4 * h)),
+            (float((place + val) * s), float(H - 4 * h)),
+            (float((place + val) * s), float(H - 2 * h)),
+            (float((place + 0) * s), float(H - 2 * h)),
+        ]
+
+    assert self.car is not None
+    true_speed = np.sqrt(
+        np.square(self.car.hull.linearVelocity[0])
+        + np.square(self.car.hull.linearVelocity[1])
+    )
+
+    # simple wrapper to render if the indicator value is above a threshold
+    def render_if_min(value, points, color):
+        if abs(value) > 1e-4:
+            pygame.draw.polygon(self.surf, points=points, color=color)
+
+    render_if_min(true_speed, vertical_ind(5, 0.02 * true_speed), (255, 255, 255))
+    # ABS sensors
+    render_if_min(
+        self.car.wheels[0].omega,
+        vertical_ind(7, 0.01 * self.car.wheels[0].omega),
+        (0, 0, 255),
+    )
+    render_if_min(
+        self.car.wheels[1].omega,
+        vertical_ind(8, 0.01 * self.car.wheels[1].omega),
+        (0, 0, 255),
+    )
+    render_if_min(
+        self.car.wheels[2].omega,
+        vertical_ind(9, 0.01 * self.car.wheels[2].omega),
+        (51, 0, 255),
+    )
+    render_if_min(
+        self.car.wheels[3].omega,
+        vertical_ind(10, 0.01 * self.car.wheels[3].omega),
+        (51, 0, 255),
+    )
+
+    render_if_min(
+        self.car.wheels[0].joint.angle,
+        horiz_ind(20, -10.0 * self.car.wheels[0].joint.angle),
+        (0, 255, 0),
+    )
+    render_if_min(
+        self.car.hull.angularVelocity,
+        horiz_ind(30, -0.8 * self.car.hull.angularVelocity),
+        (255, 0, 0),
+    )
+
+car_racing_module.CarRacing._render_indicators = patched_render_indicators
+# -------------------------------------------------------
+
 # Hyperparameters
 LATENT_SIZE = 32
 HIDDEN_SIZE = 256

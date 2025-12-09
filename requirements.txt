@@ -1,7 +1,7 @@
-numpy==1.24.4
+numpy>=1.26.0
 scipy
 gymnasium==0.29.1
-gymnasium[box2d]
+gymnasium[box2d]==0.29.1
 scikit-learn
 torch
 cma 
