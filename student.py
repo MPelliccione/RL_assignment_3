@@ -351,7 +351,7 @@ class Policy(nn.Module):
         optimizer = torch.optim.Adam(self.vae.parameters())
         # Flatten rollouts
         all_obs = np.concatenate([r[0] for r in rollouts], axis=0)
-        dataset = TensorDataset(torch.from_numpy(all_obs).permute(0, 3, 1, 2).float() / 255.0)
+        dataset = TensorDataset(torch.from_numpy(all_obs).permute(0, 3, 1, 2).contiguous().float() / 255.0)
         loader = DataLoader(dataset, batch_size=64, shuffle=True)
         
         for epoch in range(5): # Increase epochs
@@ -378,7 +378,7 @@ class Policy(nn.Module):
         action_seqs = []
         with torch.no_grad():
             for obs, act in rollouts:
-                obs_torch = torch.from_numpy(obs).permute(0, 3, 1, 2).float().to(self.device) / 255.0
+                obs_torch = torch.from_numpy(obs).permute(0, 3, 1, 2).contiguous().float().to(self.device) / 255.0
                 _, mu, _ = self.vae(obs_torch)
                 z_seqs.append(mu)
                 action_seqs.append(torch.from_numpy(act).float().to(self.device))
