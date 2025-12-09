@@ -327,7 +327,7 @@ class Policy(nn.Module):
         print("Collecting rollouts...")
         env = gym.make('CarRacing-v2', continuous=True)
         rollouts = []
-        n_rollouts = 100 # Increase for better results
+        n_rollouts = 10 # Increase for better results
         
         for i in range(n_rollouts):
             obs, _ = env.reset()
