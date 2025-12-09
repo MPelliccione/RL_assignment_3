@@ -194,27 +194,27 @@ class VAE(nn.Module):
         super(VAE, self).__init__()
         self.device = device
         self.encoder = nn.Sequential(
-            nn.Conv2d(3, 32, 4, stride=2),
+            nn.Conv2d(3, 32, 4, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, 64, 4, stride=2),
+            nn.Conv2d(32, 64, 4, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv2d(64, 128, 4, stride=2),
+            nn.Conv2d(64, 128, 4, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv2d(128, 256, 4, stride=2),
+            nn.Conv2d(128, 256, 4, stride=2, padding=1),
             nn.ReLU()
         )
-        self.fc_mu = nn.Linear(2*2*256, LATENT_SIZE)
-        self.fc_logvar = nn.Linear(2*2*256, LATENT_SIZE)
+        self.fc_mu = nn.Linear(4*4*256, LATENT_SIZE)
+        self.fc_logvar = nn.Linear(4*4*256, LATENT_SIZE)
         
-        self.decoder_input = nn.Linear(LATENT_SIZE, 2*2*256)
+        self.decoder_input = nn.Linear(LATENT_SIZE, 4*4*256)
         self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(256, 128, 5, stride=2),
+            nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),
             nn.ReLU(),
-            nn.ConvTranspose2d(128, 64, 5, stride=2),
+            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
             nn.ReLU(),
-            nn.ConvTranspose2d(64, 32, 6, stride=2),
+            nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1),
             nn.ReLU(),
-            nn.ConvTranspose2d(32, 3, 6, stride=2),
+            nn.ConvTranspose2d(32, 3, 4, stride=2, padding=1),
             nn.Sigmoid()
         )
 
@@ -225,12 +225,12 @@ class VAE(nn.Module):
 
     def forward(self, x):
         x = self.encoder(x)
-        x = x.view(-1, 2*2*256)
+        x = x.view(-1, 4*4*256)
         mu = self.fc_mu(x)
         logvar = self.fc_logvar(x)
         z = self.reparameterize(mu, logvar)
         d = self.decoder_input(z)
-        d = d.view(-1, 256, 2, 2)
+        d = d.view(-1, 256, 4, 4)
         recon = self.decoder(d)
         return recon, mu, logvar
 
